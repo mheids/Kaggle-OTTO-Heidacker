@@ -7,6 +7,7 @@ Data processing and normalization for OTTO
 # Standard Imports
 from __future__ import annotations
 import pickle
+import math
 from enum import Enum
 from collections import defaultdict, namedtuple
 from pathlib import Path
@@ -18,7 +19,7 @@ import pandas as pd
 from tqdm import tqdm
 
 # Typing Imports
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Any
 
 
 def _make_gen(reader):
@@ -57,6 +58,9 @@ class Embedding:
     def __setstate__(self, state: dict) -> None:
         for k, v in state.items():
             self.__dict__[k] = v
+
+    def __getitem__(self, item: Any) -> dict:
+        return self.values[item]
 
     def save(
         self, output: Optional[str | Path] = None, verbose: bool | None = None
@@ -127,9 +131,18 @@ class Embedding:
         if not self.finalized:
             if verbose:
                 print("Normalizing Embeddings...")
-            best = max([max(subdict.values()) for subdict in self.values.values()])
+            nums = np.array([value for values in self.values.values() for value in values.values()])
+            max_nums = max(nums)
+            nums /= max_nums
+            logs = np.log(nums)
+
+            min_adjust = min(logs) - (1 / math.log(max_nums))
+            max_value = max(logs + abs(min_adjust))
+
+            adjust_value = lambda value: (math.log(value / max_nums) + abs(min_adjust)) / max_value
+
             self.values = {
-                key1: {key2: value / best for key2, value in subdict.items()}
+                key1: {key2: adjust_value(value) for key2, value in subdict.items()}
                 for key1, subdict in tqdm(
                     self.values.items(),
                     disable=not verbose,
@@ -161,7 +174,7 @@ class Embedding:
 
 
 def main():
-    # Embedding(verbose=True).train(100).save().pretty_print()
+    Embedding(verbose=True).train(3).save().pretty_print()
 
     start = perf_counter()
     Embedding.load().pretty_print()
@@ -170,3 +183,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

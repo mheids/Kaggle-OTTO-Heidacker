@@ -1,3 +1,4 @@
 data/
 embeddings/
 traindata.csv
+__pycache__/
