@@ -38,7 +38,6 @@ def main():
     model = Model(threshold=0)
     events = [{"aid":1254160,"ts":1661976314324,"type":"clicks"},{"aid":186382,"ts":1661976400248,"type":"clicks"},{"aid":1254160,"ts":1661976971766,"type":"clicks"},{"aid":850486,"ts":1661977190599,"type":"clicks"},{"aid":1254160,"ts":1661977202848,"type":"clicks"},{"aid":186382,"ts":1661977231509,"type":"clicks"}]
 
-
     print(model(events))
 
 if __name__ == '__main__':
