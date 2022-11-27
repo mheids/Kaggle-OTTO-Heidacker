@@ -17,6 +17,7 @@ from time import perf_counter
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from numba import jit
 
 # Typing Imports
 from typing import Optional, Sequence, Any
@@ -38,6 +39,11 @@ def rawgencount(filename):
 Key = namedtuple("Key", ["aid", "action"])
 
 
+class DefaultFloatDict:
+    def __new__(cls):
+        return defaultdict(float)
+
+
 class Action(Enum):
     CLICKS = "clicks"
     CARTS = "carts"
@@ -46,7 +52,7 @@ class Action(Enum):
 
 class Embedding:
     def __init__(self, window: tuple[int, int] = (0, 1), verbose: bool = True) -> None:
-        self.values = defaultdict(lambda: defaultdict(float))
+        self.values = defaultdict(DefaultFloatDict)
         self.window = window
         self.finalized = False
         self.verbose = verbose
@@ -80,11 +86,16 @@ class Embedding:
             return pickle.load(f)
 
     def get_window(self, events: Sequence, index: int) -> list[dict]:
-        min_bound = max(index - self.window[0], 0)
-        max_bound = min(index + self.window[1], len(events)) + 1
+        lookback, lookahead = self.window
+        min_bound = 0 if lookback is None else max(index - lookback, 0)
+        max_bound = (
+            len(events) + 1
+            if lookback is None
+            else min(index + lookahead, len(events)) + 1
+        )
         before = events[min_bound:index]
         after = events[index + 1 : max_bound]
-        return before + after
+        return [(event, 1) for event in before + after]
 
     def train_chunk(self, data: pd.DataFrame, verbose: bool | None = None) -> None:
         verbose = self.verbose if verbose is None else verbose
@@ -92,9 +103,9 @@ class Embedding:
             events = session[1]["events"]
             for i, event in enumerate(events):
                 key1 = Key(event["aid"], event["type"])
-                for other_event in self.get_window(events, i):
+                for other_event, value in self.get_window(events, i):
                     key2 = Key(other_event["aid"], other_event["type"])
-                    self.values[key1][key2] += 1
+                    self.values[key1][key2] += value
 
     def train(
         self,
@@ -131,7 +142,9 @@ class Embedding:
         if not self.finalized:
             if verbose:
                 print("Normalizing Embeddings...")
-            nums = np.array([value for values in self.values.values() for value in values.values()])
+            nums = np.array(
+                [value for values in self.values.values() for value in values.values()]
+            )
             max_nums = max(nums)
             nums /= max_nums
             logs = np.log(nums)
@@ -139,16 +152,16 @@ class Embedding:
             min_adjust = min(logs) - (1 / math.log(max_nums))
             max_value = max(logs + abs(min_adjust))
 
-            adjust_value = lambda value: (math.log(value / max_nums) + abs(min_adjust)) / max_value
+            adjust_value = (
+                lambda value: (math.log(value / max_nums) + abs(min_adjust)) / max_value
+            )
 
-            self.values = {
-                key1: {key2: adjust_value(value) for key2, value in subdict.items()}
-                for key1, subdict in tqdm(
-                    self.values.items(),
-                    disable=not verbose,
-                    desc="Finalizing Embeddings",
-                )
-            }
+            for k1, subdict in tqdm(
+                self.values.items(), disable=not verbose, desc="Finalizing Embeddings"
+            ):
+                for k2, value in subdict.items():
+                    self.values[k1][k2] = adjust_value(value)
+
             self.finalized = True
         return self
 
@@ -173,8 +186,21 @@ class Embedding:
         return self
 
 
+def train_set(embeddings: dict[str, tuple[int, int]], verbose: bool = True) -> None:
+    for name, window in embeddings.items():
+        out_path = Path(f"./embeddings/{name}.p").resolve()
+        Embedding(window, verbose).train().save(out_path)
+
+
+def train_from_file(file: str | Path, verbose: bool = True) -> None:
+    ...
+
+
 def main():
-    Embedding(verbose=True).train(3).save().pretty_print()
+    start = perf_counter()
+    embedding = Embedding(verbose=True).train(10)
+    print(f"Trained embeddings in {perf_counter() - start:.3f} seconds")
+    embedding.save()
 
     start = perf_counter()
     Embedding.load().pretty_print()
@@ -183,4 +209,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
