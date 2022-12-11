@@ -126,13 +126,35 @@ class Model:
     def ewma(
         self, events: Sequence[dict[str, int | str]], alpha: float = 0.1
     ) -> dict[Key, float]:
+        array = EventArray(events, self.embedding)
+        data = array.array
+        print(data)
+        print('\n')
         """Exponential Weighted Moving Average"""
-        data = EventArray(events, self.embedding)
-        powers = np.ones(data.shape) * np.arange(data.shape[0] - 1, -1, -1)[:, None]
-        print(powers)
+
+        alpha_rev = 1-alpha
+        scale = 1/alpha_rev
+
+        powers = np.ones(data.shape) * np.arange(data.shape[0] - 1, -1, -1)[:, np.newaxis]
+        scale_arr = scale**powers
+        offset = data*alpha_rev**(powers+1)
+
+        pw0 = alpha*alpha_rev**(powers-1)
+        mult = data*pw0*scale_arr
+      
+        cumsums = mult.cumsum(axis=0)
+        out = offset + cumsums*scale_arr[::-1]
+        
+        out = out[-1]
+        print(out)
+        print('\n')
+        return {key: out[i] for key, i in array.indexer.items()}
+
 
 
 def main():
+    np.set_printoptions(linewidth=200)
+
     model = Model(threshold=0)
     events = [
         {"aid": 1254160, "ts": 1661976314324, "type": "clicks"},
@@ -142,7 +164,9 @@ def main():
         {"aid": 1254160, "ts": 1661977202848, "type": "clicks"},
         {"aid": 186382, "ts": 1661977231509, "type": "clicks"},
     ]
-    print(model(events, "ewma"))
+    output = sorted(list(model(events, "ewma").items()), key = lambda item: item[1], reverse=True)
+    for key, value in output:
+        print(f"{key}:{' ' * (42-len(str(key)))}{value}")
 
 
 if __name__ == "__main__":
